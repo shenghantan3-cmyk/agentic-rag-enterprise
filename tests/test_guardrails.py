@@ -93,5 +93,33 @@ class TestGraphBudgets(unittest.TestCase):
         self.assertEqual(edges.route_after_orchestrator_call(state), "fallback_response")
 
 
+class TestIntentRoutingEdge(unittest.TestCase):
+    def test_route_after_intent_fans_out(self):
+        from rag_agent import edges
+
+        routes = [
+            {"intent": "document", "rationale": "docs"},
+            {"intent": "market", "rationale": "quote"},
+            {"intent": "fusion", "rationale": "both"},
+        ]
+        state = {
+            "rewrittenQuestions": ["q1", "q2", "q3"],
+            "intent_routes": routes,
+        }
+
+        sends = edges.route_after_intent(state)
+        self.assertEqual(len(sends), 3)
+
+        nodes = [getattr(s, "node", None) for s in sends]
+        if nodes[0] is None:
+            # Fallback Send dataclass uses .node, but if LangGraph Send differs,
+            # allow a .name attribute.
+            nodes = [getattr(s, "name", None) for s in sends]
+
+        self.assertEqual(nodes[0], "agent")
+        self.assertEqual(nodes[1], "market_agent")
+        self.assertEqual(nodes[2], "fusion_agent")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,21 +1,56 @@
 from typing import Literal
 
-from langchain_core.messages import ToolMessage
-from langgraph.types import Send
+# Optional dependencies: some test environments don't ship langchain/langgraph.
+try:
+    from langchain_core.messages import ToolMessage  # type: ignore
+except Exception:  # pragma: no cover
+    class ToolMessage:  # type: ignore
+        pass
+
+try:
+    from langgraph.types import Send  # type: ignore
+except Exception:  # pragma: no cover
+    # Minimal fallback for environments without langgraph.
+    from dataclasses import dataclass
+    from typing import Any, Dict
+
+    @dataclass
+    class Send:  # type: ignore
+        node: str
+        arg: Dict[str, Any]
 
 from .graph_state import State, AgentState
 from config import MAX_ITERATIONS, MAX_OPENBB_CALLS, MAX_TOOL_CALLS
 from openbb.storage import record_budget_event
 
-def route_after_rewrite(state: State) -> Literal["request_clarification", "agent"]:
+def route_after_rewrite(state: State) -> Literal["request_clarification", "route_intent"]:
     if not state.get("questionIsClear", False):
         return "request_clarification"
-    else:
-        return [
-                Send("agent", {"question": query, "question_index": idx, "messages": []})
-                for idx, query in enumerate(state["rewrittenQuestions"])
-            ]
-    
+    return "route_intent"
+
+
+def route_after_intent(state: State):
+    questions = state.get("rewrittenQuestions") or []
+    routes = state.get("intent_routes") or []
+
+    # Safety fallback.
+    if len(routes) != len(questions):
+        routes = [{"intent": "document", "rationale": "fallback"} for _ in questions]
+
+    intent_to_node = {
+        "document": "agent",
+        "market": "market_agent",
+        "fusion": "fusion_agent",
+    }
+
+    return [
+        Send(
+            intent_to_node.get((routes[idx] or {}).get("intent"), "agent"),
+            {"question": query, "question_index": idx, "messages": []},
+        )
+        for idx, query in enumerate(questions)
+    ]
+
 def _count_openbb_tool_messages(state: AgentState) -> int:
     count = 0
     for m in state.get("messages") or []:

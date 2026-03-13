@@ -2,7 +2,7 @@ from typing import Literal, Set
 from langchain_core.messages import SystemMessage, HumanMessage, RemoveMessage, AIMessage, ToolMessage
 from langgraph.types import Command
 from .graph_state import State, AgentState
-from .schemas import QueryAnalysis
+from .schemas import QueryAnalysis, IntentRouting
 from .prompts import *
 from utils import estimate_context_tokens
 from config import BASE_TOKEN_THRESHOLD, TOKEN_GROWTH_FACTOR
@@ -47,6 +47,92 @@ def rewrite_query(state: State, llm):
 
 def request_clarification(state: State):
     return {}
+
+
+def route_intent(state: State, llm):
+    """Classify each rewritten question into document|market|fusion."""
+
+    questions = state.get("rewrittenQuestions") or []
+    if not questions:
+        return {"intent_routes": []}
+
+    llm_with_structure = llm.with_config(temperature=0).with_structured_output(IntentRouting)
+
+    import json
+
+    prompt = get_route_intent_prompt().format(
+        questions=json.dumps(list(questions), ensure_ascii=False)
+    )
+    response = llm_with_structure.invoke([SystemMessage(content=prompt)])
+
+    routes = []
+    if response and getattr(response, "routes", None):
+        routes = [r.model_dump() for r in response.routes]
+
+    # Safety fallback: if length mismatch, default to document.
+    if len(routes) != len(questions):
+        routes = [{"intent": "document", "rationale": "fallback"} for _ in questions]
+
+    return {"intent_routes": routes}
+
+
+# --- Agent Nodes ---
+
+def market_orchestrator(state: AgentState, llm_with_tools):
+    """Market-only orchestrator (OpenBB tools only, no document search)."""
+
+    sys_msg = SystemMessage(content=get_market_orchestrator_prompt())
+
+    if not state.get("messages"):
+        human_msg = HumanMessage(content=state["question"])
+        response = llm_with_tools.invoke([sys_msg, human_msg])
+        return {"messages": [human_msg, response], "tool_call_count": len(response.tool_calls or []), "iteration_count": 1}
+
+    response = llm_with_tools.invoke([sys_msg] + state["messages"])
+    tool_calls = response.tool_calls if hasattr(response, "tool_calls") else []
+    return {"messages": [response], "tool_call_count": len(tool_calls) if tool_calls else 0, "iteration_count": 1}
+
+
+def fusion_run(state: AgentState, llm, doc_subgraph, market_subgraph):
+    """Run both doc + market subgraphs, then fuse their answers."""
+
+    q = state.get("question")
+    idx = int(state.get("question_index", 0) or 0)
+
+    base_in = {"question": q, "question_index": idx, "messages": []}
+
+    doc_out = doc_subgraph.invoke(base_in)
+    market_out = market_subgraph.invoke(base_in)
+
+    doc_answer = (doc_out or {}).get("final_answer") or ""
+    market_answer = (market_out or {}).get("final_answer") or ""
+
+    doc_cites = (doc_out or {}).get("citations") or []
+    market_cites = (market_out or {}).get("citations") or []
+
+    fusion_input = (
+        f"## Document-grounded answer\n\n{doc_answer}\n\n"
+        f"## Market-data-grounded answer\n\n{market_answer}"
+    )
+
+    fused = llm.invoke([SystemMessage(content=get_fusion_prompt()), HumanMessage(content=fusion_input)])
+    fused_text = getattr(fused, "content", None) or str(fused)
+
+    # Merge citations (deduping is handled by reducer when bubbled up).
+    citations = list(doc_cites) + list(market_cites)
+
+    return {
+        "final_answer": fused_text,
+        "agent_answers": [
+            {
+                "index": idx,
+                "question": q,
+                "answer": fused_text,
+                "citations": citations,
+            }
+        ],
+        "citations": citations,
+    }
 
 # --- Agent Nodes ---
 def orchestrator(state: AgentState, llm_with_tools):

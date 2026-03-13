@@ -1,6 +1,12 @@
 from typing import List, Annotated, Set, Dict
-from langgraph.graph import MessagesState
 import operator
+
+# Optional dependency: some test environments may not include langgraph.
+try:
+    from langgraph.graph import MessagesState  # type: ignore
+except Exception:  # pragma: no cover
+    class MessagesState(dict):  # type: ignore
+        pass
 
 from common.citations import merge_citations
 
@@ -19,6 +25,9 @@ class State(MessagesState):
     conversation_summary: str = ""
     originalQuery: str = ""
     rewrittenQuestions: List[str] = []
+
+    # One route per rewritten question.
+    intent_routes: List[dict] = []
 
     # Each agent subgraph returns an answer dict. We reset between rewrites.
     agent_answers: Annotated[List[dict], accumulate_or_reset] = []
