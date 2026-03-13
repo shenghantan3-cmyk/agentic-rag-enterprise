@@ -3,8 +3,14 @@
 This project optionally integrates a **local OpenBB Platform server** as a set of LangChain tools.
 
 - Default base URL: `http://127.0.0.1:6900`
-- Override via environment variable:
+- Override via environment variables:
   - `OPENBB_BASE_URL=http://127.0.0.1:6900`
+  - `MAX_DATE_RANGE_DAYS=3650` (default; upper-bounded per endpoint)
+  - `MAX_NEWS_LIMIT=50` (default; hard-capped at 50)
+
+Agent-level budget (graph routing):
+- `MAX_OPENBB_CALLS=4` (default; max executed OpenBB tool calls per agent run)
+- `MAX_TOOL_CALLS=8` (default; max tool calls per agent run)
 
 The tools are **safe-by-default** for demo usage:
 - Provider is restricted to `yfinance` only (no external API keys)
@@ -36,7 +42,8 @@ Get historical price data.
 
 Sanitization:
 - If dates are omitted, defaults to last 30 days
-- Maximum range is clamped to 3650 days
+- Maximum range is clamped to `min(3650, MAX_DATE_RANGE_DAYS)`
+  - Override via env: `MAX_DATE_RANGE_DAYS`
 
 ### 3) `openbb_news_company`
 Get recent company news.
@@ -51,7 +58,10 @@ Get recent company news.
 
 Sanitization:
 - If dates are omitted, defaults to last 30 days
-- Maximum range is clamped to 365 days
+- Maximum range is clamped to `min(365, MAX_DATE_RANGE_DAYS)`
+  - Override via env: `MAX_DATE_RANGE_DAYS`
+- `limit` is capped at `min(50, MAX_NEWS_LIMIT)`
+  - Override via env: `MAX_NEWS_LIMIT`
 
 ## Cache + Audit log
 

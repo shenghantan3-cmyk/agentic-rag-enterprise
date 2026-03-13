@@ -18,10 +18,33 @@ LLM_MODEL = "qwen3:4b-instruct-2507-q4_K_M"
 LLM_TEMPERATURE = 0
 
 # --- Agent Configuration ---
-MAX_TOOL_CALLS = 8
-MAX_ITERATIONS = 10
-BASE_TOKEN_THRESHOLD = 2000
-TOKEN_GROWTH_FACTOR = 0.9
+
+def _env_int(name: str, default: int, *, min_value: int | None = None, max_value: int | None = None) -> int:
+    """Read an int from env with optional clamping."""
+    raw = os.getenv(name)
+    if raw is None or str(raw).strip() == "":
+        v = int(default)
+    else:
+        try:
+            v = int(str(raw).strip())
+        except Exception:
+            v = int(default)
+    if min_value is not None:
+        v = max(int(min_value), v)
+    if max_value is not None:
+        v = min(int(max_value), v)
+    return v
+
+
+# Global budgets / guardrails (override via env)
+MAX_TOOL_CALLS = _env_int("MAX_TOOL_CALLS", 8, min_value=0)
+MAX_OPENBB_CALLS = _env_int("MAX_OPENBB_CALLS", 4, min_value=0)
+MAX_DATE_RANGE_DAYS = _env_int("MAX_DATE_RANGE_DAYS", 3650, min_value=1)
+MAX_NEWS_LIMIT = _env_int("MAX_NEWS_LIMIT", 50, min_value=1)
+
+MAX_ITERATIONS = _env_int("MAX_ITERATIONS", 10, min_value=1)
+BASE_TOKEN_THRESHOLD = _env_int("BASE_TOKEN_THRESHOLD", 2000, min_value=256)
+TOKEN_GROWTH_FACTOR = float(os.getenv("TOKEN_GROWTH_FACTOR", "0.9"))
 
 # --- Text Splitter Configuration ---
 CHILD_CHUNK_SIZE = 500

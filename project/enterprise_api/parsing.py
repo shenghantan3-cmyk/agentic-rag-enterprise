@@ -58,14 +58,45 @@ def extract_citations(answer_text: str) -> List[str]:
 
 
 def summarize_openbb_tool_calls(tool_calls: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Build a compact summary for API response."""
+    """Build a compact summary for API response.
+
+    Note: the agent may emit budget/guardrail events into the OpenBB audit log
+    as pseudo tool calls with endpoint prefix "budget::".
+
+    We return those separately under `budget_events` and exclude them from
+    the main counts.
+    """
     if not tool_calls:
-        return {"count": 0, "endpoints": [], "cache_hits": 0, "avg_latency_ms": None}
+        return {
+            "count": 0,
+            "endpoints": [],
+            "cache_hits": 0,
+            "avg_latency_ms": None,
+            "budget_events": [],
+        }
+
+    budget_events: List[str] = []
+    normal_calls: List[Dict[str, Any]] = []
+    for tc in tool_calls or []:
+        ep = str(tc.get("endpoint") or "")
+        if ep.startswith("budget::"):
+            budget_events.append(ep)
+        else:
+            normal_calls.append(tc)
+
+    if not normal_calls:
+        return {
+            "count": 0,
+            "endpoints": [],
+            "cache_hits": 0,
+            "avg_latency_ms": None,
+            "budget_events": budget_events,
+        }
 
     endpoints = []
     cache_hits = 0
     total_latency = 0
-    for tc in tool_calls:
+    for tc in normal_calls:
         ep = tc.get("endpoint")
         if ep and ep not in endpoints:
             endpoints.append(ep)
@@ -76,10 +107,11 @@ def summarize_openbb_tool_calls(tool_calls: List[Dict[str, Any]]) -> Dict[str, A
         except Exception:
             pass
 
-    avg = int(total_latency / max(1, len(tool_calls)))
+    avg = int(total_latency / max(1, len(normal_calls)))
     return {
-        "count": len(tool_calls),
+        "count": len(normal_calls),
         "endpoints": endpoints,
         "cache_hits": cache_hits,
         "avg_latency_ms": avg,
+        "budget_events": budget_events,
     }

@@ -789,7 +789,12 @@ Hard limits on tool calls and iterations prevent infinite loops. Token counting 
 ```python
 import tiktoken
 
+# These can be overridden via environment variables.
 MAX_TOOL_CALLS = 8       # Maximum tool calls per agent run
+MAX_OPENBB_CALLS = 4     # Maximum executed OpenBB tool calls per agent run
+MAX_DATE_RANGE_DAYS = 3650  # Max date range (OpenBB tools; upper-bounded per endpoint)
+MAX_NEWS_LIMIT = 50      # Max news items (OpenBB; hard-capped at 50)
+
 MAX_ITERATIONS = 10      # Maximum agent loop iterations
 BASE_TOKEN_THRESHOLD = 2000     # Initial token threshold for compression
 TOKEN_GROWTH_FACTOR = 0.9       # Multiplier applied after each compression
@@ -898,11 +903,12 @@ def orchestrator(state: AgentState):
     tool_calls = response.tool_calls if hasattr(response, "tool_calls") else []
     return {"messages": [response], "tool_call_count": len(tool_calls) if tool_calls else 0, "iteration_count": 1}
 
-def route_after_orchestrator_call(state: AgentState) -> Literal["tool", "fallback_response", "collect_answer"]:
+def route_after_orchestrator_call(state: AgentState) -> Literal["tools", "fallback_response", "collect_answer"]:
     iteration = state.get("iteration_count", 0)
     tool_count = state.get("tool_call_count", 0)
 
-    if iteration >= MAX_ITERATIONS or tool_count > MAX_TOOL_CALLS:
+    # Stop if budgets are exhausted
+    if iteration >= MAX_ITERATIONS or tool_count >= MAX_TOOL_CALLS:
         return "fallback_response"
 
     last_message = state["messages"][-1]
@@ -910,7 +916,7 @@ def route_after_orchestrator_call(state: AgentState) -> Literal["tool", "fallbac
 
     if not tool_calls:
         return "collect_answer"
-    
+
     return "tools"
 
 def fallback_response(state: AgentState):

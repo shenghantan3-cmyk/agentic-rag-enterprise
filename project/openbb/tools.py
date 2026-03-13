@@ -21,6 +21,8 @@ from typing import Any, Literal, Optional
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
+import config as _config
+
 from .client import OpenBBClient
 
 
@@ -107,7 +109,7 @@ def openbb_equity_price_historical(
         _parse_date(start_date),
         _parse_date(end_date),
         default_days=30,
-        max_days=3650,
+        max_days=max(1, min(3650, int(_config.MAX_DATE_RANGE_DAYS))),
     )
 
     if interval not in {"1d", "1wk", "1mo"}:
@@ -173,14 +175,17 @@ def openbb_news_company(
         _parse_date(start_date),
         _parse_date(end_date),
         default_days=30,
-        max_days=365,
+        max_days=max(1, min(365, int(_config.MAX_DATE_RANGE_DAYS))),
     )
 
     try:
         lim = int(limit) if limit is not None else 10
     except Exception:
         lim = 10
-    lim = max(1, min(50, lim))
+    # Hard cap for safety; knob can only reduce.
+    hard_cap = 50
+    knob_cap = int(getattr(_config, "MAX_NEWS_LIMIT", hard_cap))
+    lim = max(1, min(hard_cap, knob_cap, lim))
 
     params: dict[str, Any] = {
         "provider": provider,

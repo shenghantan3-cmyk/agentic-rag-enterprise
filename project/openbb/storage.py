@@ -31,6 +31,32 @@ def get_current_run_id() -> Optional[str]:
     return _CURRENT_RUN_ID.get()
 
 
+def record_budget_event(kind: str, **fields: Any) -> None:
+    """Record a budget/guardrail event into the OpenBB audit log.
+
+    This is a lightweight side-channel used by the agent graph to persist
+    guardrail hits into enterprise run metadata (via audit_sync).
+
+    - No-op when no current run_id is set.
+    - Stored as an audit_log row with endpoint prefixed by "budget::".
+    """
+    if not get_current_run_id():
+        return
+    try:
+        store = OpenBBToolStore()
+        store.write_audit(
+            endpoint=f"budget::{kind}",
+            params={"kind": kind, **fields},
+            status_code=429,
+            latency_ms=0,
+            cache_hit=False,
+            error=None,
+        )
+    except Exception:
+        # Best-effort only; never break the main run.
+        return
+
+
 def _default_db_path() -> str:
     # Place DB file under project/openbb/ by default
     base_dir = os.path.dirname(__file__)
