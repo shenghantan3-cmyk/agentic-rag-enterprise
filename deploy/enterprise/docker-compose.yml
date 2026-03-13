@@ -1,0 +1,67 @@
+services:
+  enterprise-api:
+    build:
+      context: ../..
+      dockerfile: deploy/enterprise/Dockerfile.enterprise-api
+    env_file:
+      - .env
+    environment:
+      # Force Postgres in compose (sqlite remains default if DATABASE_URL is unset).
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://enterprise:enterprise@postgres:5432/enterprise}
+      # Point Qdrant client at the qdrant service.
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      # Suggested for production: set to a non-empty string and send X-API-Key
+      ENTERPRISE_API_KEY: ${ENTERPRISE_API_KEY:-}
+      # Enable prometheus metrics endpoint
+      ENTERPRISE_METRICS_ENABLED: ${ENTERPRISE_METRICS_ENABLED:-1}
+      # Alembic migrations on startup
+      ENTERPRISE_RUN_MIGRATIONS: ${ENTERPRISE_RUN_MIGRATIONS:-1}
+      # Concurrency (gunicorn workers)
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      - postgres
+      - qdrant
+      - redis
+    ports:
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: enterprise
+      POSTGRES_USER: enterprise
+      POSTGRES_PASSWORD: enterprise
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U enterprise -d enterprise"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.15.0
+    ports:
+      - "127.0.0.1:6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  qdrant_data:
+  redis_data:

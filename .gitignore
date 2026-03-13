@@ -10,6 +10,7 @@ parent_store/
 docs/*
 !docs/openbb_tools.md
 !docs/enterprise_api.md
+!docs/enterprise_deploy.md
 !docs/design/
 !docs/design/**
 

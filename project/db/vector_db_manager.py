@@ -1,15 +1,25 @@
+import os
 import config
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 
+
 class VectorDbManager:
     __client: QdrantClient
     __dense_embeddings: HuggingFaceEmbeddings
     __sparse_embeddings: FastEmbedSparse
+
     def __init__(self):
-        self.__client = QdrantClient(path=config.QDRANT_DB_PATH)
+        # If QDRANT_URL is set, use remote Qdrant (e.g., docker-compose service).
+        # Otherwise, fall back to embedded/local storage path.
+        qdrant_url = os.getenv("QDRANT_URL")
+        if qdrant_url:
+            self.__client = QdrantClient(url=qdrant_url)
+        else:
+            self.__client = QdrantClient(path=config.QDRANT_DB_PATH)
+
         self.__dense_embeddings = HuggingFaceEmbeddings(model_name=config.DENSE_MODEL)
         self.__sparse_embeddings = FastEmbedSparse(model_name=config.SPARSE_MODEL)
 

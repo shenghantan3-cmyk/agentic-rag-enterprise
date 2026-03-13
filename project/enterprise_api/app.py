@@ -17,6 +17,24 @@ from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
+from enterprise_api.auth import ApiKeyAuthMiddleware
+from enterprise_api.metrics import (
+    MetricsMiddleware,
+    metrics_enabled,
+    metrics_response,
+    observe_chat_duration,
+    observe_tool_calls,
+)
+from enterprise_api.observability import (
+    RequestContextMiddleware,
+    log_fields,
+    set_run_id,
+    setup_json_logging,
+)
+
+import time
+import logging
+
 # Ensure `import config` and other project-local absolute imports work.
 _PROJECT_DIR = Path(__file__).resolve().parents[1]
 if str(_PROJECT_DIR) not in sys.path:
@@ -65,14 +83,39 @@ class RunResponse(BaseModel):
     tool_calls: List[Dict[str, Any]]
 
 
-init_db()
+logger = logging.getLogger("enterprise_api")
+setup_json_logging()
 
 app = FastAPI(title="Agentic RAG Enterprise API", version="0.1.0")
+
+# Middleware order: auth -> request context -> metrics
+app.add_middleware(ApiKeyAuthMiddleware)
+app.add_middleware(RequestContextMiddleware)
+if metrics_enabled():
+    app.add_middleware(MetricsMiddleware)
+
+
+@app.on_event("startup")
+def _startup() -> None:
+    # In local dev (sqlite), create tables automatically.
+    # In compose/prod (postgres), Alembic should have created tables.
+    try:
+        db_url = os.getenv("DATABASE_URL", "")
+        create_schema = (not db_url) or db_url.startswith("sqlite")
+        init_db(create_schema=create_schema)
+    except Exception as e:
+        logger.error("db init failed", extra=log_fields(error=str(e)))
+        raise
 
 
 @app.get("/healthz")
 def healthz() -> Dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/metrics")
+def metrics() -> Any:
+    return metrics_response()
 
 
 def _get_rag_system_for_conversation(conversation_id: Optional[str]):
@@ -92,46 +135,80 @@ def chat(req: ChatRequest) -> ChatResponse:
 
     # Attach run_id to OpenBB tool audit logs via ContextVar.
     set_current_run_id(run_id)
+    # Attach run_id to app logs.
+    set_run_id(run_id)
 
-    from core.chat_interface import ChatInterface
+    start = time.perf_counter()
 
-    rag = _get_rag_system_for_conversation(conversation_id)
-    chat_interface = ChatInterface(rag)
+    copied: List[Dict[str, Any]] = []
+    citations: List[str] = []
+    openbb_used: Dict[str, Any] = {"count": 0, "endpoints": [], "cache_hits": 0, "avg_latency_ms": None}
+    ok = False
+    err: Optional[str] = None
 
-    answer = chat_interface.chat(req.message, history=[])
-    citations = extract_citations(answer)
-
-    db = get_session()
     try:
-        run_row = Run(
-            id=run_id,
-            conversation_id=conversation_id,
-            status="completed",
-            user_message=req.message,
-            answer=answer,
-            citations_json=json.dumps(citations, ensure_ascii=False),
-            openbb_summary_json=None,
-            error=None,
-        )
-        db.add(run_row)
-        db.add(Message(run_id=run_id, conversation_id=conversation_id, role="user", content=req.message))
-        db.add(Message(run_id=run_id, conversation_id=conversation_id, role="assistant", content=answer))
+        from core.chat_interface import ChatInterface
 
-        # Copy OpenBB audit rows into enterprise DB and compute summary.
-        copied = copy_openbb_audit_to_enterprise(run_id=run_id, db=db)
-        openbb_used = summarize_openbb_tool_calls(copied)
-        run_row.openbb_summary_json = json.dumps(openbb_used, ensure_ascii=False)
+        rag = _get_rag_system_for_conversation(conversation_id)
+        chat_interface = ChatInterface(rag)
 
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        answer = chat_interface.chat(req.message, history=[])
+        citations = extract_citations(answer)
+
+        db = get_session()
+        try:
+            run_row = Run(
+                id=run_id,
+                conversation_id=conversation_id,
+                status="completed",
+                user_message=req.message,
+                answer=answer,
+                citations_json=json.dumps(citations, ensure_ascii=False),
+                openbb_summary_json=None,
+                error=None,
+            )
+            db.add(run_row)
+            db.add(Message(run_id=run_id, conversation_id=conversation_id, role="user", content=req.message))
+            db.add(Message(run_id=run_id, conversation_id=conversation_id, role="assistant", content=answer))
+
+            # Copy OpenBB audit rows into enterprise DB and compute summary.
+            copied = copy_openbb_audit_to_enterprise(run_id=run_id, db=db)
+            openbb_used = summarize_openbb_tool_calls(copied)
+            run_row.openbb_summary_json = json.dumps(openbb_used, ensure_ascii=False)
+
+            db.commit()
+            ok = True
+        except Exception as e:
+            db.rollback()
+            err = str(e)
+            logger.exception("chat failed", extra=log_fields(error=err))
+            raise HTTPException(status_code=500, detail=err)
+        finally:
+            db.close()
+
+        return ChatResponse(run_id=run_id, answer=answer, citations=citations, openbb_used=openbb_used)
+
     finally:
-        db.close()
-        # Clear run_id context
-        set_current_run_id(None)
+        # metrics and logging (run even on failure)
+        elapsed = time.perf_counter() - start
+        observe_chat_duration(elapsed)
+        observe_tool_calls([{"provider": "openbb", **tc} for tc in (copied or [])])
 
-    return ChatResponse(run_id=run_id, answer=answer, citations=citations, openbb_used=openbb_used)
+        logger.info(
+            "chat finished",
+            extra=log_fields(
+                conversation_id=conversation_id,
+                status="completed" if ok else "error",
+                error=err,
+                elapsed_ms=int(elapsed * 1000),
+                citations_count=len(citations),
+                tool_calls=len(copied or []),
+            ),
+        )
+
+        # Clear run_id contexts
+        set_current_run_id(None)
+        set_run_id(None)
 
 
 @app.post("/v1/documents/upload", response_model=UploadResponse)

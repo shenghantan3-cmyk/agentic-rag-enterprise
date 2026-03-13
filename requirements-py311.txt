@@ -130,6 +130,12 @@ urllib3==2.6.3
 uuid_utils==0.13.0
 uvicorn==0.40.0
 SQLAlchemy==2.0.38
+
+# Enterprise deploy extras
+alembic==1.16.5
+prometheus-client==0.22.0
+gunicorn==23.0.0
+psycopg[binary]==3.2.10
 wcwidth==0.2.14
 xxhash==3.6.0
 zstandard==0.25.0

@@ -1,0 +1,32 @@
+# Enterprise API deployment
+
+This Dockerfile builds the FastAPI "enterprise" API.
+# We use Python 3.11 to match requirements-py311.txt.
+
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+WORKDIR /app
+
+# System deps (psycopg needs libpq; build tools kept minimal)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install python deps
+COPY requirements-py311.txt /app/requirements-py311.txt
+RUN pip install --no-cache-dir --upgrade pip \
+ && pip install --no-cache-dir -r /app/requirements-py311.txt
+
+# Copy repo
+COPY . /app
+
+# Entrypoint runs migrations then starts gunicorn
+COPY deploy/enterprise/entrypoint.enterprise-api.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 8000
+
+CMD ["/entrypoint.sh"]

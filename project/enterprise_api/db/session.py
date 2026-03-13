@@ -15,15 +15,31 @@ def get_engine() -> Engine:
     global _ENGINE
     if _ENGINE is None:
         settings = get_settings()
-        _ENGINE = create_engine(settings.database_url, future=True)
+        # pool_pre_ping helps with stale connections in multi-worker deployments.
+        connect_args = {}
+        if settings.database_url.startswith("sqlite"):
+            # sqlite needs this for multi-threaded web servers
+            connect_args = {"check_same_thread": False}
+        _ENGINE = create_engine(
+            settings.database_url,
+            future=True,
+            pool_pre_ping=True,
+            connect_args=connect_args,
+        )
     return _ENGINE
 
 
-def init_db() -> None:
-    """Initialize database and session factory."""
+def init_db(*, create_schema: bool = True) -> None:
+    """Initialize database and session factory.
+
+    For production Postgres, prefer Alembic migrations instead of create_all.
+    We keep create_all as a local-dev fallback (and for SQLite).
+    """
+
     global _SessionLocal
     engine = get_engine()
-    Base.metadata.create_all(bind=engine)
+    if create_schema:
+        Base.metadata.create_all(bind=engine)
     _SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

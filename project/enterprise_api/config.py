@@ -40,6 +40,8 @@ def load_dotenv_if_available(env_path: str | None = None) -> None:
 class Settings:
     database_url: str
     enterprise_db_path: str
+    enterprise_api_key: str
+    metrics_enabled: bool
 
 
 def get_settings() -> Settings:
@@ -48,7 +50,12 @@ def get_settings() -> Settings:
     default_db_path = base_dir / "enterprise.db"
     database_url = os.getenv("DATABASE_URL") or f"sqlite:///{default_db_path}"
 
+    api_key = os.getenv("ENTERPRISE_API_KEY") or ""
+    metrics_enabled = os.getenv("ENTERPRISE_METRICS_ENABLED", "1") not in {"0", "false", "False"}
+
     return Settings(
         database_url=database_url,
         enterprise_db_path=str(default_db_path),
+        enterprise_api_key=api_key,
+        metrics_enabled=metrics_enabled,
     )
