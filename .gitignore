@@ -12,6 +12,8 @@ docs/*
 !docs/enterprise_api.md
 !docs/enterprise_deploy.md
 !docs/enterprise_jobs.md
+!docs/enterprise/
+!docs/enterprise/**
 !docs/design/
 !docs/design/**
 
