@@ -11,6 +11,10 @@ All tools:
 - sanitize inputs
 - constrain date ranges / limits
 - use local cache + audit log
+
+Milestone M4: return tool outputs as JSON (tool_output.v1) via
+`common.citations.pack_tool_output` so the agent can extract structured
+citations.
 """
 
 from __future__ import annotations
@@ -22,8 +26,10 @@ from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
 import config as _config
+from common.citations import now_iso, pack_tool_output
 
 from .client import OpenBBClient
+from .storage import stable_params_hash
 
 
 def _parse_date(d: Optional[str]) -> Optional[_dt.date]:
@@ -65,6 +71,32 @@ def _only_yfinance(provider: Optional[str]) -> str:
     if provider != "yfinance":
         raise ValueError("Only provider='yfinance' is supported in this demo environment.")
     return provider
+
+
+def _pack_openbb_tool_output(*, endpoint: str, params: dict[str, Any], raw_json_text: str) -> str:
+    """Pack a tool output with a structured OpenBB citation."""
+
+    endpoint = endpoint if endpoint.startswith("/") else f"/{endpoint}"
+    p_hash = stable_params_hash(params or {})
+
+    text = (
+        f"OpenBB {endpoint}\n"
+        f"params_hash={p_hash}\n"
+        f"params={params}\n\n"
+        f"response:\n{raw_json_text}"
+    )
+
+    citations = [
+        {
+            "source": "openbb",
+            "endpoint": endpoint,
+            "params_hash": p_hash,
+            "snippet": f"OpenBB {endpoint} (params_hash={p_hash})",
+            "created_at": now_iso(),
+        }
+    ]
+
+    return pack_tool_output(text=text, citations=citations)
 
 
 class EquityPriceHistoricalArgs(BaseModel):
@@ -126,13 +158,14 @@ def openbb_equity_price_historical(
     }
 
     client = OpenBBClient()
-    # historical can be cached longer
-    return client.get_json(
-        "/api/v1/equity/price/historical",
+    endpoint = "/api/v1/equity/price/historical"
+    raw = client.get_json(
+        endpoint,
         params=params,
         ttl_seconds=60 * 30,
         use_cache=bool(use_cache),
     )
+    return _pack_openbb_tool_output(endpoint=endpoint, params=params, raw_json_text=raw)
 
 
 @tool("openbb_equity_price_quote", args_schema=EquityPriceQuoteArgs, parse_docstring=False)
@@ -151,12 +184,14 @@ def openbb_equity_price_quote(
     }
 
     client = OpenBBClient()
-    return client.get_json(
-        "/api/v1/equity/price/quote",
+    endpoint = "/api/v1/equity/price/quote"
+    raw = client.get_json(
+        endpoint,
         params=params,
         ttl_seconds=60 * 5,
         use_cache=bool(use_cache),
     )
+    return _pack_openbb_tool_output(endpoint=endpoint, params=params, raw_json_text=raw)
 
 
 @tool("openbb_news_company", args_schema=NewsCompanyArgs, parse_docstring=False)
@@ -197,12 +232,14 @@ def openbb_news_company(
     }
 
     client = OpenBBClient()
-    return client.get_json(
-        "/api/v1/news/company",
+    endpoint = "/api/v1/news/company"
+    raw = client.get_json(
+        endpoint,
         params=params,
         ttl_seconds=60 * 30,
         use_cache=bool(use_cache),
     )
+    return _pack_openbb_tool_output(endpoint=endpoint, params=params, raw_json_text=raw)
 
 
 def create_openbb_tools() -> list:
