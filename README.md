@@ -109,6 +109,21 @@ Parallel Agent Reasoning → Aggregation → Final Response
 
 ---
 
+### Routing: document vs market vs fusion
+
+After query rewriting/clarification, an **M4 router** selects the best execution path:
+
+- **document** — answer using RAG over your indexed documents (PDF/Markdown → chunks → vector DB).
+- **market** — answer using market-data tools/connectors (no document retrieval).
+- **fusion** — combine both: retrieve from documents *and* market data, then synthesize one response.
+
+**Example prompts**
+- **document:** “In the uploaded *Employee Handbook*, what’s the PTO policy for contractors?”
+- **market:** “What was AAPL’s close yesterday, and how did it move over the last 5 trading days?”
+- **fusion:** “Based on our *Investment Policy* doc, can we buy NVDA today? Summarize the rule and compare it to NVDA’s current valuation metrics.”
+
+---
+
 ## LLM Provider Configuration
 
 This system is provider-agnostic — it supports any LLM provider available in [LangChain](https://python.langchain.com/docs/integrations/chat/), swappable in a single line. The examples below cover the most common options, but the same pattern applies to any other supported provider.
