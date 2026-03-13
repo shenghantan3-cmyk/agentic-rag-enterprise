@@ -56,7 +56,8 @@ Response:
 
 - `run_id`: unique run identifier
 - `answer`: final assistant answer
-- `citations`: list of cited source filenames (best-effort)
+- `citations`: structured citations (doc_id/doc_name/source, chunk_id, parent_id, snippet, score, span_start/span_end, retriever, created_at)
+- `citation_files`: list of cited source filenames (best-effort, derived from citations)
 - `openbb_used`: summary of OpenBB tool usage (count/endpoints/cache hits)
 
 ### POST /v1/documents/upload
@@ -86,7 +87,7 @@ The enterprise DB (default: `project/enterprise.db`) stores:
 
 - `runs`:
   - `id`, `conversation_id`, `created_at`, `status`, `user_message`, `answer`
-  - `citations_json`, `openbb_summary_json`, `error`
+  - `citations_json` (legacy filenames list), `citations_payload_json` (structured citations; JSON string), `openbb_summary_json`, `error`
 - `messages`:
   - minimal user/assistant messages per run
 - `tool_calls`:

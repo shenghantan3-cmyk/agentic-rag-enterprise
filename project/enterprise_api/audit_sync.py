@@ -20,6 +20,15 @@ def _default_openbb_db_path() -> str:
 def _connect_openbb(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path, timeout=30)
     conn.row_factory = sqlite3.Row
+
+    # Best-effort migration for legacy OpenBB audit DBs.
+    try:
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(audit_log)").fetchall()]
+        if "run_id" not in cols:
+            conn.execute("ALTER TABLE audit_log ADD COLUMN run_id TEXT")
+    except Exception:
+        pass
+
     return conn
 
 

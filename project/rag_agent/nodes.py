@@ -7,6 +7,8 @@ from .prompts import *
 from utils import estimate_context_tokens
 from config import BASE_TOKEN_THRESHOLD, TOKEN_GROWTH_FACTOR
 
+from common.citations import unpack_tool_output
+
 def summarize_history(state: State, llm):
     if len(state["messages"]) < 4:
         return {"conversation_summary": ""}
@@ -67,10 +69,19 @@ def orchestrator(state: AgentState, llm_with_tools):
 def fallback_response(state: AgentState, llm):
     seen = set()
     unique_contents = []
+    citations = []
+
     for m in state["messages"]:
-        if isinstance(m, ToolMessage) and m.content not in seen:
-            unique_contents.append(m.content)
-            seen.add(m.content)
+        if not isinstance(m, ToolMessage):
+            continue
+
+        text, cites = unpack_tool_output(m.content or "")
+        citations.extend(cites or [])
+
+        # Only pass the human-readable part to the synthesis prompt.
+        if text and text not in seen:
+            unique_contents.append(text)
+            seen.add(text)
 
     context_summary = state.get("context_summary", "").strip()
 
@@ -79,8 +90,8 @@ def fallback_response(state: AgentState, llm):
         context_parts.append(f"## Compressed Research Context (from prior iterations)\n\n{context_summary}")
     if unique_contents:
         context_parts.append(
-            "## Retrieved Data (current iteration)\n\n" +
-            "\n\n".join(f"--- DATA SOURCE {i} ---\n{content}" for i, content in enumerate(unique_contents, 1))
+            "## Retrieved Data (current iteration)\n\n"
+            + "\n\n".join(f"--- DATA SOURCE {i} ---\n{content}" for i, content in enumerate(unique_contents, 1))
         )
 
     context_text = "\n\n".join(context_parts) if context_parts else "No data was retrieved from the documents."
@@ -91,10 +102,20 @@ def fallback_response(state: AgentState, llm):
         f"INSTRUCTION:\nProvide the best possible answer using only the data above."
     )
     response = llm.invoke([SystemMessage(content=get_fallback_response_prompt()), HumanMessage(content=prompt_content)])
-    return {"messages": [response]}
+
+    # Merge newly observed citations into state.
+    return {"messages": [response], "citations": citations}
 
 def should_compress_context(state: AgentState) -> Command[Literal["compress_context", "orchestrator"]]:
     messages = state["messages"]
+
+    # Collect structured citations from tool outputs.
+    citations = []
+    for m in messages:
+        if isinstance(m, ToolMessage):
+            _text, cites = unpack_tool_output(m.content or "")
+            if cites:
+                citations.extend(cites)
 
     new_ids: Set[str] = set()
     for msg in reversed(messages):
@@ -122,7 +143,7 @@ def should_compress_context(state: AgentState) -> Command[Literal["compress_cont
     max_allowed = BASE_TOKEN_THRESHOLD + int(current_token_summary * TOKEN_GROWTH_FACTOR)
 
     goto = "compress_context" if current_tokens > max_allowed else "orchestrator"
-    return Command(update={"retrieval_keys": updated_ids}, goto=goto)
+    return Command(update={"retrieval_keys": updated_ids, "citations": citations}, goto=goto)
 
 def compress_context(state: AgentState, llm):
     messages = state["messages"]
@@ -167,9 +188,21 @@ def collect_answer(state: AgentState):
     last_message = state["messages"][-1]
     is_valid = isinstance(last_message, AIMessage) and last_message.content and not last_message.tool_calls
     answer = last_message.content if is_valid else "Unable to generate an answer."
+
+    # Bubble citations up into the answer payload so the main graph can merge across subgraphs.
+    citations = state.get("citations") or []
+
     return {
         "final_answer": answer,
-        "agent_answers": [{"index": state["question_index"], "question": state["question"], "answer": answer}]
+        "agent_answers": [
+            {
+                "index": state["question_index"],
+                "question": state["question"],
+                "answer": answer,
+                "citations": citations,
+            }
+        ],
+        "citations": citations,
     }
 # --- End of Agent Nodes---
 
@@ -180,9 +213,16 @@ def aggregate_answers(state: State, llm):
     sorted_answers = sorted(state["agent_answers"], key=lambda x: x["index"])
 
     formatted_answers = ""
+    all_citations = []
     for i, ans in enumerate(sorted_answers, start=1):
-        formatted_answers += (f"\nAnswer {i}:\n"f"{ans['answer']}\n")
+        formatted_answers += (f"\nAnswer {i}:\n" f"{ans['answer']}\n")
+        if isinstance(ans, dict) and ans.get("citations"):
+            all_citations.extend(ans.get("citations") or [])
 
-    user_message = HumanMessage(content=f"""Original user question: {state["originalQuery"]}\nRetrieved answers:{formatted_answers}""")
+    user_message = HumanMessage(
+        content=f"""Original user question: {state['originalQuery']}\nRetrieved answers:{formatted_answers}"""
+    )
     synthesis_response = llm.invoke([SystemMessage(content=get_aggregation_prompt()), user_message])
-    return {"messages": [AIMessage(content=synthesis_response.content)]}
+
+    # Merge all citations across subgraphs into main state.
+    return {"messages": [AIMessage(content=synthesis_response.content)], "citations": all_citations}

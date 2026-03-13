@@ -34,12 +34,27 @@ def init_db(*, create_schema: bool = True) -> None:
 
     For production Postgres, prefer Alembic migrations instead of create_all.
     We keep create_all as a local-dev fallback (and for SQLite).
+
+    Note: create_all does not add new columns to existing tables. For local
+    SQLite usage we apply a tiny best-effort migration for additive columns.
     """
 
     global _SessionLocal
     engine = get_engine()
     if create_schema:
         Base.metadata.create_all(bind=engine)
+
+        # Best-effort additive migration for SQLite.
+        try:
+            if str(engine.url).startswith("sqlite"):
+                with engine.connect() as conn:
+                    cols = [r[1] for r in conn.exec_driver_sql("PRAGMA table_info(runs)").fetchall()]
+                    if "citations_payload_json" not in cols:
+                        conn.exec_driver_sql("ALTER TABLE runs ADD COLUMN citations_payload_json TEXT")
+        except Exception:
+            # Never break startup for best-effort migrations.
+            pass
+
     _SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

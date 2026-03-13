@@ -24,6 +24,9 @@ class Run(Base):
     answer: Mapped[str] = mapped_column(Text)
 
     citations_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # New: structured citations payloads (list[dict])
+    citations_payload_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     openbb_summary_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
