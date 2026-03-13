@@ -11,6 +11,32 @@ class Base(DeclarativeBase):
     pass
 
 
+class Job(Base):
+    __tablename__ = "jobs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)  # RQ job id
+    kind: Mapped[str] = mapped_column(String(64), index=True)  # document_ingest|noop|...
+    status: Mapped[str] = mapped_column(String(32), index=True)  # queued|running|completed|failed
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    progress: Mapped[int] = mapped_column(Integer, default=0)  # 0-100
+    message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    doc_id: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    # Job input payload (e.g. filename, file_path). Stored as JSON string.
+    payload_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Job output/result. Stored as JSON string.
+    result_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Extra per-job metrics (duration, etc). Stored as JSON string.
+    metrics_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
 class Run(Base):
     __tablename__ = "runs"
 

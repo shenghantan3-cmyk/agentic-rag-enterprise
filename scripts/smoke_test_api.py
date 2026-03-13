@@ -36,6 +36,8 @@ def main() -> None:
     assert "/healthz" in routes
     assert "/v1/chat" in routes
     assert "/v1/documents/upload" in routes
+    assert "/v1/jobs/{job_id}" in routes
+    assert "/v1/jobs/noop" in routes
 
     # Optional runtime check
     try:

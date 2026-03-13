@@ -51,6 +51,31 @@ def init_db(*, create_schema: bool = True) -> None:
                     cols = [r[1] for r in conn.exec_driver_sql("PRAGMA table_info(runs)").fetchall()]
                     if "citations_payload_json" not in cols:
                         conn.exec_driver_sql("ALTER TABLE runs ADD COLUMN citations_payload_json TEXT")
+
+                    # Create jobs table if missing (best-effort).
+                    tbls = [r[0] for r in conn.exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+                    if "jobs" not in tbls:
+                        conn.exec_driver_sql(
+                            """
+                            CREATE TABLE jobs (
+                              id VARCHAR(64) PRIMARY KEY,
+                              kind VARCHAR(64) NOT NULL,
+                              status VARCHAR(32) NOT NULL,
+                              created_at DATETIME NOT NULL,
+                              started_at DATETIME,
+                              finished_at DATETIME,
+                              progress INTEGER NOT NULL DEFAULT 0,
+                              message TEXT,
+                              doc_id VARCHAR(128),
+                              payload_json TEXT,
+                              result_json TEXT,
+                              error TEXT,
+                              metrics_json TEXT
+                            )
+                            """
+                        )
+                        conn.exec_driver_sql("CREATE INDEX ix_jobs_kind ON jobs (kind)")
+                        conn.exec_driver_sql("CREATE INDEX ix_jobs_status ON jobs (status)")
         except Exception:
             # Never break startup for best-effort migrations.
             pass

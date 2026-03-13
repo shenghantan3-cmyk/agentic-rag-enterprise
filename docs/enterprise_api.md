@@ -62,7 +62,7 @@ Response:
 
 ### POST /v1/documents/upload
 
-Multipart upload (PDF or MD). Upload triggers indexing via existing `DocumentManager`.
+Multipart upload (PDF or MD). Upload **enqueues** indexing.
 
 ```bash
 curl -s http://127.0.0.1:8000/v1/documents/upload \
@@ -71,7 +71,8 @@ curl -s http://127.0.0.1:8000/v1/documents/upload \
 
 Response:
 
-- `doc_id`: generated identifier for this upload
+- `job_id`: background job identifier
+- `status_url`: URL to poll for status
 
 ### GET /v1/runs/{run_id}
 
@@ -81,9 +82,30 @@ curl -s http://127.0.0.1:8000/v1/runs/<RUN_ID>
 
 Returns run metadata and recorded tool calls.
 
+### GET /v1/jobs/{job_id}
+
+Poll job progress/result:
+
+```bash
+curl -s http://127.0.0.1:8000/v1/jobs/<JOB_ID>
+```
+
+### POST /v1/jobs/noop
+
+Enqueue a small dummy job (for smoke testing):
+
+```bash
+curl -s -X POST "http://127.0.0.1:8000/v1/jobs/noop?seconds=0.2"
+```
+
 ## Storage schema (SQLite default)
 
 The enterprise DB (default: `project/enterprise.db`) stores:
+
+- `jobs`:
+  - `id`, `kind`, `status`, `created_at`, `started_at`, `finished_at`
+  - `progress`, `message`, `doc_id`
+  - `payload_json` (input metadata), `result_json`, `metrics_json`, `error`
 
 - `runs`:
   - `id`, `conversation_id`, `created_at`, `status`, `user_message`, `answer`

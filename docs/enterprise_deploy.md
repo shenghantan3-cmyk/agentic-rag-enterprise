@@ -5,7 +5,12 @@ This repo ships a **local-first** enterprise-style deployment stack:
 - `enterprise-api` (FastAPI)
 - `postgres` (persisted volume)
 - `qdrant` (persisted volume)
-- `redis` (persisted volume; reserved for rate limiting / task queue later)
+- `redis` (persisted volume; used for job queue)
+- `worker` (RQ background worker for document ingestion)
+
+Uploads are written to a directory shared by `enterprise-api` and `worker`:
+
+- `ENTERPRISE_UPLOAD_DIR` (default in compose: `/var/lib/enterprise/uploads`)
 
 All exposed ports are bound to **127.0.0.1 only**.
 
@@ -22,6 +27,12 @@ cp ../../.env.example .env
 
 # 2) start stack
 docker compose up -d --build
+
+# (optional) watch worker logs
+# docker compose logs -f worker
+
+# (optional) smoke test jobs
+# python ../../scripts/smoke_test_jobs.py --base-url http://127.0.0.1:8000
 
 # 3) health check
 curl -s http://127.0.0.1:8000/healthz

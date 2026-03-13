@@ -11,6 +11,7 @@ docs/*
 !docs/openbb_tools.md
 !docs/enterprise_api.md
 !docs/enterprise_deploy.md
+!docs/enterprise_jobs.md
 !docs/design/
 !docs/design/**
 

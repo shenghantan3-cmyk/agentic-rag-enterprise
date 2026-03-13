@@ -16,6 +16,11 @@ services:
       ENTERPRISE_METRICS_ENABLED: ${ENTERPRISE_METRICS_ENABLED:-1}
       # Alembic migrations on startup
       ENTERPRISE_RUN_MIGRATIONS: ${ENTERPRISE_RUN_MIGRATIONS:-1}
+      # Background job queue
+      ENTERPRISE_REDIS_URL: ${ENTERPRISE_REDIS_URL:-redis://redis:6379/0}
+      ENTERPRISE_QUEUE_NAME: ${ENTERPRISE_QUEUE_NAME:-enterprise}
+      # Upload dir shared with worker
+      ENTERPRISE_UPLOAD_DIR: ${ENTERPRISE_UPLOAD_DIR:-/var/lib/enterprise/uploads}
       # Concurrency (gunicorn workers)
       WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -25,6 +30,33 @@ services:
       - redis
     ports:
       - "127.0.0.1:8000:8000"
+    volumes:
+      - uploads_data:/var/lib/enterprise/uploads
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: deploy/enterprise/Dockerfile.enterprise-api
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://enterprise:enterprise@postgres:5432/enterprise}
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      ENTERPRISE_API_KEY: ${ENTERPRISE_API_KEY:-}
+      ENTERPRISE_METRICS_ENABLED: ${ENTERPRISE_METRICS_ENABLED:-1}
+      ENTERPRISE_RUN_MIGRATIONS: "0"  # worker does not run migrations
+      ENTERPRISE_REDIS_URL: ${ENTERPRISE_REDIS_URL:-redis://redis:6379/0}
+      ENTERPRISE_QUEUE_NAME: ${ENTERPRISE_QUEUE_NAME:-enterprise}
+      ENTERPRISE_UPLOAD_DIR: ${ENTERPRISE_UPLOAD_DIR:-/var/lib/enterprise/uploads}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      - postgres
+      - qdrant
+      - redis
+    command: ["python", "-m", "project.enterprise_api.worker"]
+    volumes:
+      - uploads_data:/var/lib/enterprise/uploads
     restart: unless-stopped
 
   postgres:
@@ -65,3 +97,4 @@ volumes:
   postgres_data:
   qdrant_data:
   redis_data:
+  uploads_data:

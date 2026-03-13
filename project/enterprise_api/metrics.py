@@ -1,17 +1,25 @@
 from __future__ import annotations
 
 import os
+import sys
 import time
+from pathlib import Path
 from typing import Dict, Optional
+
+# Ensure `import enterprise_api...` works if imported standalone.
+_PROJECT_DIR = Path(__file__).resolve().parents[1]
+if str(_PROJECT_DIR) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_DIR))
 
 from fastapi import Request
 from starlette.responses import Response
 
 try:
-    from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
+    from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 except Exception:  # pragma: no cover
     CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
     Counter = None  # type: ignore
+    Gauge = None  # type: ignore
     Histogram = None  # type: ignore
     generate_latest = None  # type: ignore
 
@@ -55,6 +63,20 @@ _toolcalls_total = Counter(
     "Count of tool calls observed from audit log",
     ["provider", "endpoint", "status"],
 ) if Counter else None
+
+
+# Async jobs (computed from DB at scrape time)
+_jobs_total = Gauge(
+    "enterprise_jobs_total",
+    "Number of jobs in enterprise DB by kind and status",
+    ["kind", "status"],
+) if Gauge else None
+
+_job_duration_ms_avg = Gauge(
+    "enterprise_job_duration_ms_avg",
+    "Average duration (ms) of completed jobs in enterprise DB by kind",
+    ["kind"],
+) if Gauge else None
 
 
 def route_template_for_request(request: Request) -> str:
@@ -130,9 +152,65 @@ def observe_tool_calls(tool_calls: list[dict]) -> None:
             _toolcalls_total.labels(provider=provider, endpoint=endpoint, status=status).inc()
 
 
+def _observe_jobs_from_db() -> None:
+    if not metrics_enabled() or not _jobs_total or not _job_duration_ms_avg:
+        return
+
+    try:
+        from sqlalchemy import func
+
+        from enterprise_api.db.models import Job
+        from enterprise_api.db.session import get_session
+
+        db = get_session()
+        try:
+            # Counts by (kind,status)
+            rows = (
+                db.query(Job.kind, Job.status, func.count(Job.id))
+                .group_by(Job.kind, Job.status)
+                .all()
+            )
+            # reset by overwriting observed labels
+            seen = set()
+            for kind, status, cnt in rows:
+                k = str(kind or "")
+                s = str(status or "")
+                _jobs_total.labels(kind=k, status=s).set(int(cnt or 0))
+                seen.add((k, s))
+
+            # Avg duration (ms) for completed jobs with timestamps
+            # Use finished_at-started_at (DB-dependent). For portability, compute in Python.
+            completed = (
+                db.query(Job.kind, Job.started_at, Job.finished_at)
+                .filter(Job.status == "completed")
+                .filter(Job.started_at.isnot(None))
+                .filter(Job.finished_at.isnot(None))
+                .limit(1000)
+                .all()
+            )
+            by_kind: Dict[str, list[float]] = {}
+            for kind, started_at, finished_at in completed:
+                if not started_at or not finished_at:
+                    continue
+                dur_ms = (finished_at - started_at).total_seconds() * 1000.0
+                by_kind.setdefault(str(kind or ""), []).append(dur_ms)
+            for kind, durs in by_kind.items():
+                if durs:
+                    _job_duration_ms_avg.labels(kind=kind).set(sum(durs) / len(durs))
+        finally:
+            db.close()
+
+    except Exception:
+        # Never break metrics endpoint
+        return
+
+
 def metrics_response() -> Response:
     if not metrics_enabled():
         return Response(status_code=404, content="metrics disabled")
+
+    _observe_jobs_from_db()
+
     assert generate_latest is not None
     data = generate_latest()
     return Response(content=data, media_type=CONTENT_TYPE_LATEST)

@@ -14,7 +14,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, UploadFile, Request
 from pydantic import BaseModel, Field
 
 
@@ -48,7 +48,7 @@ from enterprise_api.schemas import Citation
 # Load .env (optional) BEFORE initializing DB engine.
 load_dotenv_if_available()
 
-from enterprise_api.db.models import Message, Run
+from enterprise_api.db.models import Job, Message, Run
 from enterprise_api.db.session import get_session, init_db
 from enterprise_api.parsing import summarize_openbb_tool_calls
 from enterprise_api.audit_sync import copy_openbb_audit_to_enterprise, list_tool_calls_for_run
@@ -75,8 +75,23 @@ class ChatResponse(BaseModel):
     openbb_used: Dict[str, Any]
 
 
-class UploadResponse(BaseModel):
-    doc_id: str
+class EnqueueResponse(BaseModel):
+    job_id: str
+    status_url: str
+
+
+class JobStatusResponse(BaseModel):
+    job_id: str
+    kind: str
+    status: str
+    progress: int = 0
+    message: Optional[str] = None
+    created_at: str = ""
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    result: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+    metrics: Optional[Dict[str, Any]] = None
 
 
 class RunResponse(BaseModel):
@@ -228,39 +243,173 @@ def chat(req: ChatRequest) -> ChatResponse:
         set_run_id(None)
 
 
-@app.post("/v1/documents/upload", response_model=UploadResponse)
-def upload_document(file: UploadFile = File(...)) -> UploadResponse:
+@app.post("/v1/documents/upload", response_model=EnqueueResponse)
+def upload_document(request: Request, file: UploadFile = File(...)) -> EnqueueResponse:
     filename = file.filename or "upload"
     suffix = Path(filename).suffix.lower()
     if suffix not in {".pdf", ".md"}:
         raise HTTPException(status_code=400, detail="Only .pdf and .md are supported")
 
-    # Save upload to a temp file for DocumentManager.
-    tmp_dir = Path(tempfile.gettempdir()) / "agentic_rag_uploads"
-    tmp_dir.mkdir(parents=True, exist_ok=True)
+    # Save upload to a local path that is also visible to the worker.
+    # In docker-compose, both enterprise-api and worker should mount the same directory.
+    upload_root = Path(os.getenv("ENTERPRISE_UPLOAD_DIR") or (Path(tempfile.gettempdir()) / "agentic_rag_uploads"))
+    upload_root.mkdir(parents=True, exist_ok=True)
     doc_id = f"{Path(filename).stem}-{uuid.uuid4().hex[:8]}"
-    tmp_path = tmp_dir / f"{doc_id}{suffix}"
+    tmp_path = upload_root / f"{doc_id}{suffix}"
+
+    from enterprise_api.queue import get_queue
+
+    # We set an explicit job id so DB and queue share the same identifier.
+    job_id = uuid.uuid4().hex
+
+    db = get_session()
+    try:
+        db.add(
+            Job(
+                id=job_id,
+                kind="document_ingest",
+                status="queued",
+                progress=0,
+                message="queued",
+                doc_id=doc_id,
+                payload_json=json.dumps(
+                    {
+                        "filename": filename,
+                        "content_type": file.content_type,
+                        "file_path": str(tmp_path),
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+        )
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
 
     try:
         data = file.file.read()
         tmp_path.write_bytes(data)
 
-        from core.rag_system import RAGSystem
-        from core.document_manager import DocumentManager
-
-        rag = RAGSystem()
-        rag.initialize()
-        dm = DocumentManager(rag)
-        added, skipped = dm.add_documents([str(tmp_path)])
-
-        if added <= 0 and skipped > 0:
-            # likely duplicate
-            pass
-
+        q = get_queue()
+        q.enqueue(
+            "enterprise_api.tasks.ingest_document",
+            job_id=job_id,
+            kwargs={"doc_id": doc_id, "file_path": str(tmp_path)},
+        )
     except Exception as e:
+        # Mark failed if enqueue fails.
+        db = get_session()
+        try:
+            row = db.query(Job).filter(Job.id == job_id).one_or_none()
+            if row:
+                row.status = "failed"
+                row.error = str(e)
+                row.message = "enqueue failed"
+                db.commit()
+        except Exception:
+            db.rollback()
+        finally:
+            db.close()
         raise HTTPException(status_code=500, detail=str(e))
 
-    return UploadResponse(doc_id=doc_id)
+    status_url = str(request.base_url).rstrip("/") + f"/v1/jobs/{job_id}"
+    return EnqueueResponse(job_id=job_id, status_url=status_url)
+
+
+@app.get("/v1/jobs/{job_id}", response_model=JobStatusResponse)
+def get_job(job_id: str) -> JobStatusResponse:
+    db = get_session()
+    try:
+        row = db.query(Job).filter(Job.id == job_id).one_or_none()
+        if not row:
+            raise HTTPException(status_code=404, detail="job not found")
+
+        result: Optional[Dict[str, Any]] = None
+        if row.result_json:
+            try:
+                result = json.loads(row.result_json)
+            except Exception:
+                result = None
+
+        metrics: Optional[Dict[str, Any]] = None
+        if row.metrics_json:
+            try:
+                metrics = json.loads(row.metrics_json)
+            except Exception:
+                metrics = None
+
+        created_at = row.created_at.isoformat() + "Z" if row.created_at else ""
+        started_at = row.started_at.isoformat() + "Z" if row.started_at else None
+        finished_at = row.finished_at.isoformat() + "Z" if row.finished_at else None
+
+        return JobStatusResponse(
+            job_id=row.id,
+            kind=row.kind,
+            status=row.status,
+            progress=int(row.progress or 0),
+            message=row.message,
+            created_at=created_at,
+            started_at=started_at,
+            finished_at=finished_at,
+            result=result,
+            error=row.error,
+            metrics=metrics,
+        )
+    finally:
+        db.close()
+
+
+@app.post("/v1/jobs/noop", response_model=EnqueueResponse)
+def enqueue_noop(request: Request, seconds: float = 0.1) -> EnqueueResponse:
+    from enterprise_api.queue import get_queue
+
+    job_id = uuid.uuid4().hex
+
+    db = get_session()
+    try:
+        db.add(
+            Job(
+                id=job_id,
+                kind="noop",
+                status="queued",
+                progress=0,
+                message="queued",
+            )
+        )
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+    try:
+        q = get_queue()
+        q.enqueue(
+            "enterprise_api.tasks.noop",
+            job_id=job_id,
+            kwargs={"seconds": float(seconds)},
+        )
+    except Exception as e:
+        db = get_session()
+        try:
+            row = db.query(Job).filter(Job.id == job_id).one_or_none()
+            if row:
+                row.status = "failed"
+                row.error = str(e)
+                row.message = "enqueue failed"
+                db.commit()
+        except Exception:
+            db.rollback()
+        finally:
+            db.close()
+        raise HTTPException(status_code=500, detail=str(e))
+
+    status_url = str(request.base_url).rstrip("/") + f"/v1/jobs/{job_id}"
+    return EnqueueResponse(job_id=job_id, status_url=status_url)
 
 
 @app.get("/v1/runs/{run_id}", response_model=RunResponse)
