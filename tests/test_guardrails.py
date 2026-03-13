@@ -55,7 +55,8 @@ class TestOpenBBToolClamps(unittest.TestCase):
 
         openbb_tools.OpenBBClient.get_json = fake_get_json  # type: ignore
 
-        openbb_tools.openbb_news_company(symbol="AAPL", limit=999)
+        # openbb_news_company is a LangChain StructuredTool; call via .invoke
+        openbb_tools.openbb_news_company.invoke({"symbol": "AAPL", "limit": 999})
         self.assertEqual(captured["params"]["limit"], 3)
 
 
@@ -81,7 +82,7 @@ class TestGraphBudgets(unittest.TestCase):
         # One OpenBB call already executed.
         msgs = [ToolMessage(content="{}", name="openbb_equity_price_quote", tool_call_id="t1")]
         # Orchestrator now requests another OpenBB call.
-        ai = AIMessage(content="", tool_calls=[{"name": "openbb_news_company", "args": {"symbol": "AAPL"}}])
+        ai = AIMessage(content="", tool_calls=[{"id": "call_1", "name": "openbb_news_company", "args": {"symbol": "AAPL"}}])
         msgs.append(ai)
 
         state = {
