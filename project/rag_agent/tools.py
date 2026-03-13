@@ -2,6 +2,8 @@ from typing import List
 from langchain_core.tools import tool
 from db.parent_store_manager import ParentStoreManager
 
+from openbb.tools import create_openbb_tools
+
 class ToolFactory:
     
     def __init__(self, collection):
@@ -76,5 +78,8 @@ class ToolFactory:
         """Create and return the list of tools."""
         search_tool = tool("search_child_chunks")(self._search_child_chunks)
         retrieve_tool = tool("retrieve_parent_chunks")(self._retrieve_parent_chunks)
-        
-        return [search_tool, retrieve_tool]
+
+        # Optional OpenBB tools (local OpenBB server)
+        openbb_tools = create_openbb_tools()
+
+        return [search_tool, retrieve_tool] + openbb_tools

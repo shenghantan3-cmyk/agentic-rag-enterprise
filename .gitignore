@@ -5,9 +5,18 @@ markdown_docs/
 parent_store/
 
 # Ignore docs outputs by default, but keep versioned design docs
+# Ignore docs outputs by default, but keep versioned docs
+# (keep openbb_tools.md and design docs)
 docs/*
+!docs/openbb_tools.md
 !docs/design/
 !docs/design/**
 
 __pycache__/
 .vscode/
+
+# OpenBB local tool cache/audit DB
+project/openbb/*.sqlite
+
+# Local venv
+.venv/
