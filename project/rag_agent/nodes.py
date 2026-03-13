@@ -50,7 +50,7 @@ def request_clarification(state: State):
 
 
 def route_intent(state: State, llm):
-    """Classify each rewritten question into document|market|fusion."""
+    """Classify each rewritten question into document|market|fusion|general."""
 
     questions = state.get("rewrittenQuestions") or []
     if not questions:
@@ -151,6 +151,49 @@ def orchestrator(state: AgentState, llm_with_tools):
     response = llm_with_tools.invoke([sys_msg] + summary_injection + state["messages"])
     tool_calls = response.tool_calls if hasattr(response, "tool_calls") else []
     return {"messages": [response], "tool_call_count": len(tool_calls) if tool_calls else 0, "iteration_count": 1}
+
+def general_answer(state: AgentState, llm):
+    """Answer without tools/sources for out-of-domain questions.
+
+    Enterprise-safe behavior:
+    - Never call tools.
+    - If the user likely expects document-grounded output, ask for docs.
+    - Otherwise provide a brief best-effort answer and explicitly note no sources were used.
+    """
+
+    q = (state.get("question") or "").strip()
+
+    sys = SystemMessage(
+        content=(
+            "You are a helpful assistant. The user asked an out-of-domain question or no documents are available. "
+            "Answer directly WITHOUT using tools and WITHOUT claiming you used any documents or external sources. "
+            "If the question requests extracting/summarizing from a specific document or file you cannot access, "
+            "ask the user to upload/provide the relevant text instead of guessing.\n\n"
+            "Output rules:\n"
+            "- Be concise and correct.\n"
+            "- If you are uncertain, ask 1-2 clarifying questions.\n"
+            "- Start the answer directly (no preamble).\n"
+            "- If you did not use sources, include a final line: 'Note: No sources were used.'"
+        )
+    )
+
+    resp = llm.invoke([sys, HumanMessage(content=q)])
+    text = getattr(resp, "content", None) or str(resp)
+
+    return {
+        "final_answer": text,
+        "agent_answers": [
+            {
+                "index": state["question_index"],
+                "question": state["question"],
+                "answer": text,
+                "citations": [],
+            }
+        ],
+        "citations": [],
+    }
+
+
 
 def fallback_response(state: AgentState, llm):
     seen = set()

@@ -101,14 +101,15 @@ class TestIntentRoutingEdge(unittest.TestCase):
             {"intent": "document", "rationale": "docs"},
             {"intent": "market", "rationale": "quote"},
             {"intent": "fusion", "rationale": "both"},
+            {"intent": "general", "rationale": "non-finance"},
         ]
         state = {
-            "rewrittenQuestions": ["q1", "q2", "q3"],
+            "rewrittenQuestions": ["q1", "q2", "q3", "q4"],
             "intent_routes": routes,
         }
 
         sends = edges.route_after_intent(state)
-        self.assertEqual(len(sends), 3)
+        self.assertEqual(len(sends), 4)
 
         nodes = [getattr(s, "node", None) for s in sends]
         if nodes[0] is None:
@@ -119,6 +120,7 @@ class TestIntentRoutingEdge(unittest.TestCase):
         self.assertEqual(nodes[0], "agent")
         self.assertEqual(nodes[1], "market_agent")
         self.assertEqual(nodes[2], "fusion_agent")
+        self.assertEqual(nodes[3], "general_agent")
 
 
 if __name__ == "__main__":

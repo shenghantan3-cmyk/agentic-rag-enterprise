@@ -41,6 +41,8 @@ def route_after_intent(state: State):
         "document": "agent",
         "market": "market_agent",
         "fusion": "fusion_agent",
+        # Non-finance / out-of-domain questions: answer without tools.
+        "general": "general_agent",
     }
 
     return [

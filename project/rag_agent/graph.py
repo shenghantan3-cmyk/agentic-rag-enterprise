@@ -77,9 +77,17 @@ def create_agent_graph(llm, tools_list):
     graph_builder.add_node("rewrite_query", partial(rewrite_query, llm=llm))
     graph_builder.add_node("route_intent", partial(route_intent, llm=llm))
     graph_builder.add_node(request_clarification)
+    # --- General subgraph (no tools) ---
+    general_builder = StateGraph(AgentState)
+    general_builder.add_node("general_answer", partial(general_answer, llm=llm))
+    general_builder.add_edge(START, "general_answer")
+    general_builder.add_edge("general_answer", END)
+    general_subgraph = general_builder.compile()
+
     graph_builder.add_node("agent", agent_subgraph)
     graph_builder.add_node("market_agent", market_subgraph)
     graph_builder.add_node("fusion_agent", fusion_subgraph)
+    graph_builder.add_node("general_agent", general_subgraph)
     graph_builder.add_node("aggregate_answers", partial(aggregate_answers, llm=llm))
 
     graph_builder.add_edge(START, "summarize_history")
@@ -90,7 +98,7 @@ def create_agent_graph(llm, tools_list):
     # After intent routing, fan out per-question to the correct subgraph.
     graph_builder.add_conditional_edges("route_intent", route_after_intent)
 
-    graph_builder.add_edge(["agent", "market_agent", "fusion_agent"], "aggregate_answers")
+    graph_builder.add_edge(["agent", "market_agent", "fusion_agent", "general_agent"], "aggregate_answers")
     graph_builder.add_edge("aggregate_answers", END)
 
     agent_graph = graph_builder.compile(checkpointer=checkpointer, interrupt_before=["request_clarification"])

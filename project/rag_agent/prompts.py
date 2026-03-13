@@ -55,6 +55,31 @@ Output:
 - One or more rewritten, self-contained queries suitable for document retrieval
 """
 
+def get_route_intent_prompt() -> str:
+    return """You are an intent router for a retrieval-augmented assistant.
+
+You will receive a JSON list of rewritten, self-contained user questions.
+Return a JSON object with a `routes` array of equal length, where each element has:
+- intent: one of [document, market, fusion, general]
+- rationale: short reason
+
+Definitions:
+- document: The question is best answered from the user's provided/ingested documents.
+- market: The question is about public market data or company news (quotes, prices, earnings dates, headlines) and does NOT require private documents.
+- fusion: The question needs BOTH (a) document context AND (b) market data/news.
+- general: The question is unrelated to finance/market data and is not answerable from documents (or no documents are available).
+
+Enterprise guardrails:
+- If the question references "the document", "the uploaded file", "this PDF", internal policy/notes, or asks to summarize/extract from a file, choose document.
+- If unsure between document vs general, prefer document when documents are likely present.
+- Do NOT choose market for non-finance general knowledge questions.
+- Always return exactly one route per question.
+
+Questions (JSON):
+{questions}
+"""
+
+
 def get_orchestrator_prompt() -> str:
     return """You are an expert retrieval-augmented assistant.
 
