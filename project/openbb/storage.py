@@ -15,8 +15,20 @@ import json
 import os
 import sqlite3
 import time
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Optional, Tuple
+
+# Context propagation for associating OpenBB tool calls with an enterprise run_id.
+_CURRENT_RUN_ID: ContextVar[Optional[str]] = ContextVar("openbb_current_run_id", default=None)
+
+
+def set_current_run_id(run_id: Optional[str]) -> None:
+    _CURRENT_RUN_ID.set(run_id)
+
+
+def get_current_run_id() -> Optional[str]:
+    return _CURRENT_RUN_ID.get()
 
 
 def _default_db_path() -> str:
@@ -71,6 +83,7 @@ class OpenBBToolStore:
                 CREATE TABLE IF NOT EXISTS audit_log (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     ts INTEGER NOT NULL,
+                    run_id TEXT,
                     endpoint TEXT NOT NULL,
                     params_hash TEXT NOT NULL,
                     params_json TEXT NOT NULL,
@@ -81,6 +94,15 @@ class OpenBBToolStore:
                 )
                 """
             )
+
+            # Backwards-compatible migration: add run_id column if missing.
+            try:
+                cols = [r[1] for r in conn.execute("PRAGMA table_info(audit_log)").fetchall()]
+                if "run_id" not in cols:
+                    conn.execute("ALTER TABLE audit_log ADD COLUMN run_id TEXT")
+            except Exception:
+                # Best-effort migration; ignore if locked or unsupported.
+                pass
 
     def get_cache(self, cache_key: str) -> CacheResult:
         now = int(time.time())
@@ -127,11 +149,12 @@ class OpenBBToolStore:
         ts = int(time.time())
         params_json = json.dumps(params, sort_keys=True, ensure_ascii=False, default=str)
         p_hash = stable_params_hash(params)
+        run_id = get_current_run_id()
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO audit_log(ts, endpoint, params_hash, params_json, status_code, latency_ms, cache_hit, error)
-                VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO audit_log(ts, run_id, endpoint, params_hash, params_json, status_code, latency_ms, cache_hit, error)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (ts, endpoint, p_hash, params_json, status_code, int(latency_ms), 1 if cache_hit else 0, error),
+                (ts, run_id, endpoint, p_hash, params_json, status_code, int(latency_ms), 1 if cache_hit else 0, error),
             )

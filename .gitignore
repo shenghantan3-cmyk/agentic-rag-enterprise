@@ -9,6 +9,7 @@ parent_store/
 # (keep openbb_tools.md and design docs)
 docs/*
 !docs/openbb_tools.md
+!docs/enterprise_api.md
 !docs/design/
 !docs/design/**
 
@@ -20,3 +21,7 @@ project/openbb/*.sqlite
 
 # Local venv
 .venv/
+
+# Local env and enterprise DB
+.env
+project/enterprise.db
