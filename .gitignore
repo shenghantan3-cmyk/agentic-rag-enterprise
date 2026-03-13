@@ -3,6 +3,11 @@ qdrant_db/
 markdown/
 markdown_docs/
 parent_store/
-docs/
+
+# Ignore docs outputs by default, but keep versioned design docs
+docs/*
+!docs/design/
+!docs/design/**
+
 __pycache__/
 .vscode/
