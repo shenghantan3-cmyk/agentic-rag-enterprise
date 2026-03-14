@@ -1,6 +1,7 @@
 import uuid
-from langchain_ollama import ChatOllama
+
 import config
+from core.llm_factory import create_llm
 from db.vector_db_manager import VectorDbManager
 from db.parent_store_manager import ParentStoreManager
 from document_chunker import DocumentChuncker
@@ -22,7 +23,7 @@ class RAGSystem:
         self.vector_db.create_collection(self.collection_name)
         collection = self.vector_db.get_collection(self.collection_name)
         
-        llm = ChatOllama(model=config.LLM_MODEL, temperature=config.LLM_TEMPERATURE)
+        llm = create_llm()
         tools = ToolFactory(collection).create_tools()
         self.agent_graph = create_agent_graph(llm, tools)
         

@@ -29,6 +29,25 @@ Notes:
 
 Minimum required for production-like deployments:
 
+### LLM selection (Ollama local vs OpenAI-compatible cloud)
+
+This repo defaults to **Ollama** (local) for chat completions.
+
+To use a cloud OpenAI-compatible endpoint (OpenAI / Azure / OpenRouter / vLLM / etc.), set:
+
+```bash
+# choose provider: ollama (default) | openai
+export LLM_PROVIDER=openai
+
+# required for LLM_PROVIDER=openai
+export OPENAI_API_KEY="..."
+export OPENAI_MODEL="gpt-4o-mini"  # example
+
+# optional
+export OPENAI_BASE_URL="https://api.openai.com/v1"  # or your proxy base URL
+export OPENAI_TEMPERATURE="0"
+```
+
 - `DATABASE_URL`
   - Example: `postgresql+psycopg://USER:PASSWORD@HOST:5432/enterprise`
 - `ENTERPRISE_API_KEY`

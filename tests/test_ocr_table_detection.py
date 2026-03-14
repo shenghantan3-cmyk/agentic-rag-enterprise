@@ -1,16 +1,31 @@
 from __future__ import annotations
 
+import importlib.util
 import sys
 import unittest
 from pathlib import Path
 
 # Import the OCR microservice's table detection module without requiring it to be
 # installed as a package (the folder name contains a hyphen).
+#
+# IMPORTANT: Avoid mutating sys.path (e.g. inserting the OCR app dir at index 0),
+# because it can shadow the repo's `project/config.py` with the OCR service's
+# `app/config.py` and break unrelated tests.
 ROOT = Path(__file__).resolve().parents[1]
 OCR_APP = ROOT / "deploy" / "enterprise" / "ocr-service" / "app"
-sys.path.insert(0, str(OCR_APP))
 
-from table_detection import BBox, TextBox, detect_table_layout  # noqa: E402
+_spec = importlib.util.spec_from_file_location(
+    "ocr_service_table_detection", OCR_APP / "table_detection.py"
+)
+assert _spec and _spec.loader
+_table_detection = importlib.util.module_from_spec(_spec)
+# dataclasses requires module to be present in sys.modules during execution
+sys.modules[_spec.name] = _table_detection
+_spec.loader.exec_module(_table_detection)  # type: ignore[attr-defined]
+
+BBox = _table_detection.BBox
+TextBox = _table_detection.TextBox
+detect_table_layout = _table_detection.detect_table_layout
 
 
 class TestTableDetection(unittest.TestCase):
