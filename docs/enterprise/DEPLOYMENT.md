@@ -10,6 +10,7 @@ Core services:
 - **worker**: RQ worker for async jobs (document ingestion, long-running tasks)
 - **redis**: queue backend
 - **postgres**: persistent metadata (runs/jobs/messages/tool calls)
+- **ocr-service**: optional OCR microservice (PaddleOCR) used as a fallback for *scanned* PDFs with no/low text layer
 - **prometheus (optional)**: scrapes the API `/metrics` endpoint
 
 Typical flow:
@@ -22,6 +23,7 @@ Notes:
 
 - The default `docker-compose` stack also includes **Qdrant** as the vector store.
 - In the provided compose file, all ports are bound to `127.0.0.1` (loopback-only) by default.
+- OCR is opt-in/optional: the stack includes an `ocr-service` container, but OCR behavior is controlled by env vars (see below).
 
 ## Environment variables
 
@@ -43,6 +45,18 @@ Metrics:
 
 - `ENTERPRISE_METRICS_ENABLED` (`1` to enable `GET /metrics`)
   - Recommended: keep metrics behind auth (do **not** add `/metrics` to public paths)
+
+OCR (optional, for scanned PDFs without a usable text layer):
+
+- `ENTERPRISE_OCR_ENABLED` (`1` to enable OCR fallback, `0` to disable)
+- `ENTERPRISE_OCR_URL`
+  - Base URL of the OCR service
+  - Default in compose: `http://ocr-service:8001`
+- `ENTERPRISE_OCR_TEXT_THRESHOLD`
+  - Minimum extracted text length (sampled from the first few pages) to consider a PDF “text-based”
+  - If the extracted text is **below** this threshold and OCR is enabled, the worker will call `ocr-service`
+  - Default: `200`
+  - Set `0` to treat all PDFs as having sufficient text (effectively disables OCR triggering)
 
 Useful tuning:
 
@@ -78,6 +92,19 @@ cp ../../.env.example .env
 
 docker compose up -d --build
 curl -s http://127.0.0.1:8000/healthz
+```
+
+OCR service (optional):
+
+- The compose stack includes an `ocr-service` container listening on **port 8001**.
+- `enterprise-api` and `worker` call it internally via `http://ocr-service:8001`.
+- The OCR HTTP endpoint is:
+  - `POST /v1/ocr/pdf-to-md` (multipart form field name: `file`)
+
+You can sanity-check the OCR container directly (from the host):
+
+```bash
+curl -s http://127.0.0.1:8001/health
 ```
 
 If you set an API key:
@@ -126,3 +153,12 @@ Store environment variables in a root-owned file (e.g. `/etc/enterprise-api.env`
 
 - **Migrations failing on startup**
   - Set `ENTERPRISE_RUN_MIGRATIONS=0` temporarily to get the API up, then run Alembic manually.
+
+- **OCR is slow / requests time out**
+  - OCR is CPU-heavy and scales with page count. Prefer giving the container more CPU.
+  - The OCR client uses a hardcoded 120s timeout when calling the service; very large or high-DPI PDFs may exceed this.
+  - Warm-up matters: the first OCR request may be slower while models are loaded.
+
+- **High memory usage in `ocr-service`**
+  - PaddleOCR models can use significant RAM. Budget memory accordingly (and avoid running many OCR jobs concurrently).
+  - Consider using a persistent `PADDLEOCR_HOME` volume to cache/download models once (see compose env var).

@@ -21,6 +21,10 @@ services:
       ENTERPRISE_QUEUE_NAME: ${ENTERPRISE_QUEUE_NAME:-enterprise}
       # Upload dir shared with worker
       ENTERPRISE_UPLOAD_DIR: ${ENTERPRISE_UPLOAD_DIR:-/var/lib/enterprise/uploads}
+      # OCR fallback (PDFs without text layer)
+      ENTERPRISE_OCR_URL: ${ENTERPRISE_OCR_URL:-http://ocr-service:8001}
+      ENTERPRISE_OCR_ENABLED: ${ENTERPRISE_OCR_ENABLED:-1}
+      ENTERPRISE_OCR_TEXT_THRESHOLD: ${ENTERPRISE_OCR_TEXT_THRESHOLD:-200}
       # Concurrency (gunicorn workers)
       WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -28,6 +32,7 @@ services:
       - postgres
       - qdrant
       - redis
+      - ocr-service
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
@@ -49,14 +54,30 @@ services:
       ENTERPRISE_REDIS_URL: ${ENTERPRISE_REDIS_URL:-redis://redis:6379/0}
       ENTERPRISE_QUEUE_NAME: ${ENTERPRISE_QUEUE_NAME:-enterprise}
       ENTERPRISE_UPLOAD_DIR: ${ENTERPRISE_UPLOAD_DIR:-/var/lib/enterprise/uploads}
+      # OCR fallback (PDFs without text layer)
+      ENTERPRISE_OCR_URL: ${ENTERPRISE_OCR_URL:-http://ocr-service:8001}
+      ENTERPRISE_OCR_ENABLED: ${ENTERPRISE_OCR_ENABLED:-1}
+      ENTERPRISE_OCR_TEXT_THRESHOLD: ${ENTERPRISE_OCR_TEXT_THRESHOLD:-200}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     depends_on:
       - postgres
       - qdrant
       - redis
+      - ocr-service
     command: ["python", "-m", "project.enterprise_api.worker"]
     volumes:
       - uploads_data:/var/lib/enterprise/uploads
+    restart: unless-stopped
+
+  ocr-service:
+    build:
+      context: ./ocr-service
+      dockerfile: Dockerfile
+    environment:
+      # Optional: set to persistent volume if you want to cache models
+      PADDLEOCR_HOME: ${PADDLEOCR_HOME:-/tmp/paddleocr}
+    ports:
+      - "127.0.0.1:8001:8001"
     restart: unless-stopped
 
   postgres:
