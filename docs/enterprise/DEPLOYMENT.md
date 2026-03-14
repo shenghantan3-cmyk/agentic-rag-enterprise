@@ -61,19 +61,22 @@ OCR (optional, for scanned PDFs without a usable text layer):
 OCR provider selection (used by newer `ocr-service` builds that can proxy to Tencent OCR):
 
 - `OCR_PROVIDER`
-  - `paddle` (default): run local PaddleOCR inside `ocr-service`
-  - `tencent`: use Tencent Cloud OCR via API
-- `OCR_TABLE_ONLY` (`1` to return tables-only markdown, `0` to return full-page text)
-  - **Table-only policy** is useful for statement-like PDFs where you only care about tabular data.
-  - When enabled, non-table paragraphs may be dropped from OCR output.
+  - `tencent` (default): Tencent Cloud OCR via API
+  - `paddle`: run local PaddleOCR inside `ocr-service` (legacy; requires extra deps)
+- `OCR_TABLE_ONLY` (default: `1`)
+  - **Table-OCR invocation policy**.
+  - When `1`: run a cheap per-page OCR first to detect whether tables exist, and **only then** invoke Tencent TableOCR (V3).
+  - When `0`: always invoke TableOCR (more expensive; mainly for debugging).
 - `OCR_MAX_PAGES`
   - Hard limit on pages sent to OCR (guardrail for latency/cost)
+- `OCR_PAGE_DPI`
+  - DPI used to render PDF pages before sending to OCR (guardrail for cost/latency)
 
 Tencent OCR credentials (required when `OCR_PROVIDER=tencent`):
 
 - `TENCENT_SECRET_ID`
 - `TENCENT_SECRET_KEY`
-- `TENCENT_REGION` (example: `ap-guangzhou`)
+- `TENCENT_OCR_REGION` (preferred) or `TENCENT_REGION` (backward compatible, example: `ap-guangzhou`)
 
 Useful tuning:
 

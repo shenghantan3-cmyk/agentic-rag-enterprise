@@ -5,10 +5,13 @@ python-multipart==0.0.21
 # PDF rendering
 PyMuPDF==1.26.6
 pillow==11.3.0
-numpy==2.4.1
 
-# OCR
-# CPU-only PaddlePaddle. If you need GPU, switch to paddlepaddle-gpu wheels per Paddle docs.
-paddlepaddle==2.6.2
-paddleocr==2.7.0.3
-opencv-python-headless==4.10.0.84
+# OCR (Tencent Cloud)
+tencentcloud-sdk-python==3.0.1106
+
+# Optional legacy PaddleOCR backend (not installed by default anymore).
+# To use OCR_PROVIDER=paddle, extend the image and install these deps.
+# paddlepaddle==2.6.2
+# paddleocr==2.7.0.3
+# opencv-python-headless==4.10.0.84
+# numpy==2.4.1

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
 
-from .paddle_ocr import ocr_pdf_bytes_to_markdown
+from .ocr import ocr_pdf_bytes_to_markdown
 
 app = FastAPI(title="ocr-service", version="0.1.0")
 

@@ -73,9 +73,19 @@ services:
     build:
       context: ./ocr-service
       dockerfile: Dockerfile
+    env_file:
+      - .env
     environment:
-      # Optional: set to persistent volume if you want to cache models
+      # Optional: set to persistent volume if you want to cache models (legacy PaddleOCR only)
       PADDLEOCR_HOME: ${PADDLEOCR_HOME:-/tmp/paddleocr}
+      # Defaults (can be overridden in .env)
+      OCR_PROVIDER: ${OCR_PROVIDER:-tencent}
+      OCR_TABLE_ONLY: ${OCR_TABLE_ONLY:-1}
+      OCR_MAX_PAGES: ${OCR_MAX_PAGES:-20}
+      OCR_PAGE_DPI: ${OCR_PAGE_DPI:-200}
+      TENCENT_OCR_REGION: ${TENCENT_OCR_REGION:-${TENCENT_REGION:-ap-guangzhou}}
+      TENCENT_SECRET_ID: ${TENCENT_SECRET_ID:-}
+      TENCENT_SECRET_KEY: ${TENCENT_SECRET_KEY:-}
     ports:
       - "127.0.0.1:8001:8001"
     restart: unless-stopped
