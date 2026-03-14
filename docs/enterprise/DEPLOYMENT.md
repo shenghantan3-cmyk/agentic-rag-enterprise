@@ -58,6 +58,23 @@ OCR (optional, for scanned PDFs without a usable text layer):
   - Default: `200`
   - Set `0` to treat all PDFs as having sufficient text (effectively disables OCR triggering)
 
+OCR provider selection (used by newer `ocr-service` builds that can proxy to Tencent OCR):
+
+- `OCR_PROVIDER`
+  - `paddle` (default): run local PaddleOCR inside `ocr-service`
+  - `tencent`: use Tencent Cloud OCR via API
+- `OCR_TABLE_ONLY` (`1` to return tables-only markdown, `0` to return full-page text)
+  - **Table-only policy** is useful for statement-like PDFs where you only care about tabular data.
+  - When enabled, non-table paragraphs may be dropped from OCR output.
+- `OCR_MAX_PAGES`
+  - Hard limit on pages sent to OCR (guardrail for latency/cost)
+
+Tencent OCR credentials (required when `OCR_PROVIDER=tencent`):
+
+- `TENCENT_SECRET_ID`
+- `TENCENT_SECRET_KEY`
+- `TENCENT_REGION` (example: `ap-guangzhou`)
+
 Useful tuning:
 
 - `WEB_CONCURRENCY` (Gunicorn worker count)
@@ -118,6 +135,13 @@ curl -s http://127.0.0.1:8000/healthz -H "X-API-Key: $KEY"
 ### Production notes
 
 - **Do not commit secrets**: keep `.env` out of git (already ignored in this repo).
+- Prefer injecting secrets at runtime:
+  - Docker Compose: use an env file outside the repo (e.g. `/etc/enterprise/.env`) or the host’s secret manager.
+  - Kubernetes: use `Secret` objects + environment variables (or projected files) rather than baking keys into images.
+- **Tencent OCR secrets** (`TENCENT_SECRET_ID`, `TENCENT_SECRET_KEY`) should be treated like credentials:
+  - scope to the minimal permissions required
+  - rotate regularly
+  - never print them in logs
 - Put Postgres/Redis/Qdrant on managed services if desired; set `DATABASE_URL`, `ENTERPRISE_REDIS_URL` (and `QDRANT_URL` if used).
 - Consider adding TLS and auth at the edge (reverse proxy) if exposing beyond localhost.
 
